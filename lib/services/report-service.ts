@@ -1,5 +1,5 @@
 // lib/services/report-service.ts
-import type { GapAnalyzerReport, InterviewSession, InterviewTurn, SkillGap } from "@/lib/types";
+import type { GapAnalyzerReport, InterviewSession, InterviewTurn, SkillGap, Roadmap } from "@/lib/types";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 
 // In-memory cache for fast retrieval and offline demo mode
@@ -27,18 +27,14 @@ export async function saveGapReport(report: GapAnalyzerReport, userId?: string):
   }
 }
 
-export async function getGapReportById(id: string): Promise<GapAnalyzerReport | null> {
-  if (reportCache.has(id)) {
-    return reportCache.get(id)!;
-  }
-
+export async function getGapReportById(id: string, userId?: string): Promise<GapAnalyzerReport | null> {
   try {
     const supabase = getAdminSupabase();
-    const { data, error } = await supabase
-      .from("gap_reports")
-      .select("*")
-      .eq("id", id)
-      .single();
+    let query = supabase.from("gap_reports").select("*").eq("id", id);
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+    const { data, error } = await query.maybeSingle();
 
     if (!error && data) {
       const row = data as any;
@@ -57,6 +53,10 @@ export async function getGapReportById(id: string): Promise<GapAnalyzerReport | 
     }
   } catch {
     // Supabase query error
+  }
+
+  if (reportCache.has(id)) {
+    return reportCache.get(id)!;
   }
 
   // Generate fallback report for demo or invalid ID
@@ -174,3 +174,65 @@ export async function getInterviewSessionById(id: string): Promise<InterviewSess
 
   return null;
 }
+
+const roadmapCache = new Map<string, Roadmap>();
+
+export async function saveRoadmapToStore(roadmap: Roadmap, userId?: string): Promise<void> {
+  roadmapCache.set(roadmap.id, roadmap);
+  roadmapCache.set(roadmap.reportId, roadmap);
+
+  try {
+    const supabase = getAdminSupabase();
+    await (supabase.from("roadmaps") as any).upsert({
+      id: roadmap.id,
+      report_id: roadmap.reportId,
+      user_id: userId || null,
+      target_role: roadmap.targetRole,
+      estimated_weeks: roadmap.estimatedWeeks,
+      weeks: roadmap.weeks,
+      created_at: roadmap.createdAt,
+    });
+  } catch {
+    // Graceful in-memory fallback
+  }
+}
+
+export async function getRoadmapByReportId(reportIdOrId: string, userId?: string): Promise<Roadmap | null> {
+  if (roadmapCache.has(reportIdOrId)) {
+    return roadmapCache.get(reportIdOrId)!;
+  }
+
+  try {
+    const supabase = getAdminSupabase();
+    let query = supabase.from("roadmaps").select("*");
+    if (reportIdOrId.startsWith("rdm_")) {
+      query = query.eq("id", reportIdOrId);
+    } else {
+      query = query.eq("report_id", reportIdOrId);
+    }
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (!error && data) {
+      const row = data as any;
+      const roadmap: Roadmap = {
+        id: row.id,
+        reportId: row.report_id,
+        targetRole: row.target_role,
+        estimatedWeeks: row.estimated_weeks,
+        weeks: row.weeks,
+        createdAt: row.created_at,
+      };
+      roadmapCache.set(reportIdOrId, roadmap);
+      return roadmap;
+    }
+  } catch {
+    // Supabase query error
+  }
+
+  return null;
+}
+

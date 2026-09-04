@@ -1,14 +1,20 @@
 // app/api/gap-analysis/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { extractTextFromPdfBuffer } from "@/lib/parsers/pdf";
-import { runGapAnalyzerAgent } from "@/lib/agents/gap-analyzer";
-import { saveGapReport } from "@/lib/services/report-service";
+import { runMentorAgentWorkflow } from "@/lib/agents/graph";
 import { getAuthenticatedUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Verify authenticated user
+    const user = await getAuthenticatedUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = user.id;
+
     const formData = await req.formData();
     const resumeFile = formData.get("resume") as File | null;
     const jobDescription = (formData.get("jobDescription") as string) || "";
@@ -28,27 +34,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Extract raw text from PDF
+    // 2. Extract raw text from PDF
     const arrayBuffer = await resumeFile.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const resumeText = await extractTextFromPdfBuffer(buffer);
 
-    // 2. Identify authenticated user if present
-    const user = await getAuthenticatedUser();
-    const userId = user?.id;
-
-    // 3. Run LangGraph Gap Analyzer Agent
-    const report = await runGapAnalyzerAgent({
-      resumeText,
-      jobDescriptionText: jobDescription,
-      jobUrl,
+    // 3. Run unified LangGraph Mentor Agent Workflow
+    const state = await runMentorAgentWorkflow({
       userId,
+      mode: "analysis",
+      resumeText,
+      jdText: jobDescription,
+      jdUrl: jobUrl,
     });
 
-    // 4. Save report in persistence layer
-    await saveGapReport(report, userId);
+    if (!state.gapReport) {
+      return NextResponse.json(
+        { error: "Failed to generate gap analysis report" },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json(report, { status: 200 });
+    return NextResponse.json(state.gapReport, { status: 200 });
   } catch (error) {
     console.error("Gap Analysis API Error:", error);
     return NextResponse.json(

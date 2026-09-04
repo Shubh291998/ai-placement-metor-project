@@ -369,28 +369,19 @@ export async function runGapAnalyzerAgent(params: {
   jobUrl?: string;
   userId?: string;
 }): Promise<GapAnalyzerReport> {
-  const graph = createGapAnalyzerGraph();
-
-  const result = await graph.invoke({
-    resumeText: params.resumeText,
-    jobDescriptionText: params.jobDescriptionText,
-    jobUrl: params.jobUrl,
+  const { runMentorAgentWorkflow } = await import("@/lib/agents/graph");
+  const state = await runMentorAgentWorkflow({
     userId: params.userId,
-    parsedResume: null,
-    parsedJd: null,
-    ragContext: "",
-    rawGaps: [],
-    strengths: [],
-    focusAreas: [],
-    deterministicMatchScore: 0,
-    roadmap: null,
-    finalReport: null,
-    error: null,
+    mode: "analysis",
+    resumeText: params.resumeText,
+    jdText: params.jobDescriptionText,
+    jdUrl: params.jobUrl,
   });
 
-  if (!result.finalReport) {
+  if (!state.gapReport) {
     throw new Error("Gap Analyzer failed to produce a valid report");
   }
 
-  return result.finalReport;
+  return state.gapReport;
 }
+

@@ -1,9 +1,17 @@
 // app/api/interview/[sessionId]/answer/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { InterviewAnswerRequestSchema } from "@/lib/validation/schemas";
-import { getInterviewSessionById, saveInterviewSession, getGapReportById } from "@/lib/services/report-service";
+import {
+  getInterviewSessionById,
+  saveInterviewSession,
+  getGapReportById,
+} from "@/lib/services/report-service";
 import { evaluateAnswer } from "@/lib/agents/evaluator";
-import { generateQuestion, selectTargetSkillsForInterview, DEFAULT_MAX_INTERVIEW_TURNS } from "@/lib/agents/interviewer";
+import {
+  generateQuestion,
+  selectTargetSkillsForInterview,
+  DEFAULT_MAX_INTERVIEW_TURNS,
+} from "@/lib/agents/interviewer";
 import { getAuthenticatedUser } from "@/lib/supabase/server";
 import type { InterviewTurn, InterviewSession } from "@/lib/types";
 
@@ -14,6 +22,12 @@ export async function POST(
   { params }: { params: { sessionId: string } }
 ) {
   try {
+    const user = await getAuthenticatedUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = user.id;
+
     const { sessionId } = params;
     const body = await req.json();
     const parsed = InterviewAnswerRequestSchema.safeParse(body);
@@ -29,23 +43,7 @@ export async function POST(
     let session = await getInterviewSessionById(sessionId);
 
     if (!session) {
-      // Create session on the fly if needed for resilient demo
-      session = {
-        id: sessionId,
-        reportId: "default_report",
-        turns: [
-          {
-            question: {
-              id: questionId,
-              question: "Explain the architecture and concurrency model of your primary backend tech stack.",
-              targetSkill: "System Architecture",
-              difficulty: "medium",
-            },
-            answer: "",
-          },
-        ],
-        status: "in-progress",
-      };
+      return NextResponse.json({ error: "Interview session not found" }, { status: 404 });
     }
 
     // Find the matching turn
@@ -56,7 +54,7 @@ export async function POST(
       return NextResponse.json({ error: "Turn not found in session" }, { status: 404 });
     }
 
-    // 1. Evaluate candidate answer
+    // 1. Evaluate candidate answer via Evaluator Agent
     const evaluation = await evaluateAnswer({
       question: currentTurn.question,
       answer,
@@ -91,12 +89,15 @@ export async function POST(
       };
     } else {
       // Get skill gaps to select next target skill
-      const report = await getGapReportById(session.reportId);
-      const targetSkills = report ? selectTargetSkillsForInterview(report.gaps) : ["System Design", "Node.js", "Databases"];
+      const report = await getGapReportById(session.reportId, userId);
+      const targetSkills = report
+        ? selectTargetSkillsForInterview(report.gaps)
+        : ["System Design", "Node.js", "Databases"];
       const nextSkillIndex = totalAnswered % targetSkills.length;
       const nextSkill = targetSkills[nextSkillIndex] || "System Design";
 
-      // Next question difficulty adapts based on evaluator's recommendation
+      // Next question difficulty adapts based on evaluator's recommendation:
+      // score >= 8 -> hard, score >= 6 -> medium, score < 6 -> easy
       const nextDifficulty = evaluation.recommendedDifficulty;
 
       const nextQuestion = await generateQuestion({
@@ -118,8 +119,7 @@ export async function POST(
       };
     }
 
-    const user = await getAuthenticatedUser();
-    await saveInterviewSession(nextSession, user?.id);
+    await saveInterviewSession(nextSession, userId);
 
     return NextResponse.json(
       {

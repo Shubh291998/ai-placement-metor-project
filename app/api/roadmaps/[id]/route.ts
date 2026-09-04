@@ -1,6 +1,6 @@
-// app/api/reports/[id]/route.ts
+// app/api/roadmaps/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getGapReportById } from "@/lib/services/report-service";
+import { getRoadmapByReportId } from "@/lib/services/report-service";
 import { getAuthenticatedUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -17,19 +17,19 @@ export async function GET(
 
     const { id } = params;
     if (!id) {
-      return NextResponse.json({ error: "Missing report ID" }, { status: 400 });
+      return NextResponse.json({ error: "Missing roadmap ID" }, { status: 400 });
     }
 
-    const report = await getGapReportById(id, user.id);
-    if (!report) {
-      return NextResponse.json({ error: "Report not found" }, { status: 404 });
+    const roadmap = await getRoadmapByReportId(id, user.id);
+    if (!roadmap) {
+      return NextResponse.json({ error: "Roadmap not found" }, { status: 404 });
     }
 
-    return NextResponse.json(report, { status: 200 });
+    return NextResponse.json(roadmap, { status: 200 });
   } catch (error) {
-    console.error("Fetch Report API Error:", error);
+    console.error("Fetch Roadmap API Error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch gap report" },
+      { error: "Failed to fetch roadmap" },
       { status: 500 }
     );
   }
